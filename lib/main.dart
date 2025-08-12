@@ -1,14 +1,12 @@
 // Brainy Bubbles – Flutter Web test build (Vercel-ready)
-// Mirrors the original: splash screen, target-matching bubbles, goal/timer,
-// level ups with cheer messages ("YAH!"), starry pop effects, badges,
-// reduced-motion + music toggle (safe if audio asset missing).
-//
-// You can tweak level speed/goal at the "Tuning" section.
-// Inline comments explain the trickier parts so it’s easy to iterate.
+// Splash screen, target-matching bubbles, goal/timer, level-up “YAH!”,
+// starry pop effects, badges, reduced-motion, music toggle (safe if asset missing).
 
 import 'dart:async';
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker; // <-- fixes "Ticker not found"
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,10 +34,8 @@ class BrainyBubblesApp extends StatelessWidget {
 // --------------------------- Models / Enums ---------------------------------
 
 enum OverlayMode { splash, running, paused, levelup, gameover }
-
 enum ItemKind { apple, ball, star, car, house, fish }
 
-// One bubble in the world.
 class Bubble {
   Bubble({
     required this.x,
@@ -50,15 +46,10 @@ class Bubble {
     required this.hue,
     required this.item,
   });
-
-  double x, y;      // position in logical pixels
-  double r;         // radius in logical pixels
-  double vx, vy;    // velocity (px/s)
-  double hue;       // 0..360 for color variation
+  double x, y, r, vx, vy, hue;
   ItemKind item;
 }
 
-// A tiny particle for pop effects (dot or star).
 enum ParticleType { dot, star }
 
 class Particle {
@@ -70,7 +61,7 @@ class Particle {
     required this.vy,
     required this.size,
     required this.hue,
-    required this.life, // 1..0 fades out
+    required this.life,
     this.rot = 0,
     this.rotSpeed = 0,
   });
@@ -87,17 +78,14 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
-  // Rendering ticker – drives updates @ ~60fps.
   late final Ticker _ticker;
   double _lastTs = 0;
 
-  // World state
   final List<Bubble> _bubbles = [];
   final List<Particle> _particles = [];
   final Random _rng = Random();
   Size _canvasSize = Size.zero;
 
-  // UI / Game flow
   OverlayMode _mode = OverlayMode.splash;
   ItemKind _target = ItemKind.values[0];
   int _level = 1;
@@ -106,20 +94,15 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   int _high = 0;
   int _sessionBest = 0;
 
-  // Timers
   double _timeLeft = 45;
   double _spawnAccumMs = 0;
 
-  // Settings
   bool _reducedMotion = false;
   bool _musicOn = true;
 
-  // Audio – safe: try/catch if asset missing on web
-  final AudioPlayer _synth = AudioPlayer(); // for “cheer”
-  final AudioPlayer _popper = AudioPlayer(); // for “pop”
-  final AudioPlayer _bg = AudioPlayer(); // background loop
-
-  // -------------------------- Lifecycle -------------------------------------
+  final AudioPlayer _synth = AudioPlayer(); // cheer
+  final AudioPlayer _popper = AudioPlayer(); // pop
+  final AudioPlayer _bg = AudioPlayer();     // bg loop
 
   @override
   void initState() {
@@ -156,19 +139,20 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     await p.setBool('bb_music', _musicOn);
   }
 
-  // -------------------------- Tuning ----------------------------------------
+  // -------------------------- Tuning (fixed types) --------------------------
 
   int _goalFor(int lvl) => (320 * pow(1.32, (lvl - 1))).round();
-  double _timeFor(int lvl) => (_clamp(52 - (lvl - 1) * 2.5, 24, 52)).toDouble();
-  double _spawnMsFor(int lvl) => _clamp(420 - (lvl - 1) * 35, 90, 420).toDouble();
-  int _spawnBatchFor(int lvl) => _clamp(1 + (lvl ~/ 2), 1, 6);
+  double _timeFor(int lvl) => _clampD(52 - (lvl - 1) * 2.5, 24, 52);
+  double _spawnMsFor(int lvl) => _clampD(420 - (lvl - 1) * 35, 90, 420);
+  int _spawnBatchFor(int lvl) => _clampI(1 + (lvl ~/ 2), 1, 6);
 
-  // -------------------------- Helpers ---------------------------------------
+  // -------------------------- Helpers (fixed types) -------------------------
 
-  double _clamp(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
+  double _clampD(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
+  int _clampI(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
   double _rand(double a, double b) => _rng.nextDouble() * (b - a) + a;
 
-  // Audio safe wrappers (no crash if asset missing on web)
+  // Audio safe wrappers
   Future<void> _playPop(bool target) async {
     try {
       await _popper.play(AssetSource(target ? 'audio/pop_hi.mp3' : 'audio/pop_lo.mp3'));
@@ -258,7 +242,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       if (sqrt(dx*dx + dy*dy) <= b.r) {
         final hitTarget = b.item == _target;
         if (hitTarget) {
-          final base = (_clamp(100 - b.r, 20, 95)).round();
+          final base = (_clampD(100 - b.r, 20, 95)).round(); // fixed types
           _score += base;
           _levelScore += base;
           _emitStarTrail(b.x, b.y, count: _reducedMotion ? 14 : 28);
@@ -318,9 +302,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 
     if (_mode == OverlayMode.running && dt > 0) {
       _timeLeft -= dt;
-      if (_timeLeft <= 0) {
-        _failLevel();
-      }
+      if (_timeLeft <= 0) _failLevel();
 
       _spawnAccumMs += dt * 1000.0;
       final interval = _spawnMsFor(_level);
@@ -330,14 +312,12 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         for (int i = 0; i < batch; i++) _spawn();
       }
 
-      // Move bubbles upward
       for (final b in _bubbles) {
         b.x += b.vx * dt * 0.3;
         b.y += b.vy * dt * 0.6 - 10 * dt;
       }
       _bubbles.removeWhere((b) => b.y + b.r < -60);
 
-      // Particles integration
       for (final p in _particles) {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
@@ -348,16 +328,13 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       }
       _particles.removeWhere((p) => p.life <= 0);
 
-      // Occasionally guarantee a matching bubble is present
       if ((now * 1000).toInt() % 1200 < 16) _ensureMatchingExists();
-
-      // Level complete?
       if (_levelScore >= _goalFor(_level)) {
         _playCheer();
         setState(() => _mode = OverlayMode.levelup);
       }
 
-      setState(() {}); // schedule paint
+      setState(() {});
     }
   }
 
@@ -369,12 +346,10 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       appBar: AppBar(
         title: const Text('Brainy Bubbles'),
         actions: [
-          // Music toggle
           Row(children: [
             const Text('Music', style: TextStyle(fontSize: 12)),
             Switch(value: _musicOn, onChanged: (_) { setState(()=>_musicOn=!_musicOn); _applyMusic(); }),
           ]),
-          // Reduced motion
           Row(children: [
             const Text('Gentle', style: TextStyle(fontSize: 12)),
             Switch(value: _reducedMotion, onChanged: (v) { setState(()=>_reducedMotion=v); _savePrefs(); }),
@@ -388,12 +363,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 
           return Stack(
             children: [
-              // Game canvas
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTapDown: (d) {
-                  if (_mode == OverlayMode.running) _popAt(d.localPosition);
-                },
+                onTapDown: (d) { if (_mode == OverlayMode.running) _popAt(d.localPosition); },
                 child: CustomPaint(
                   size: Size.infinite,
                   painter: _GamePainter(
@@ -406,13 +378,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
               ),
 
-              // HUD (badges)
               Positioned(
                 left: 12, right: 12, top: 8,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Target preview
                     _TargetPreview(kind: _target),
                     Row(children: [
                       _Badge(icon: '⭐', label: 'Points', value: '$_score'),
@@ -425,7 +395,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
               ),
 
-              // Progress bar + hint
               Positioned(
                 left: 12, right: 12, top: 78,
                 child: Column(
@@ -441,18 +410,17 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text('Pop the bubble that matches the picture. Smaller bubbles = more points.',
+                    const Text(
+                      'Pop the bubble that matches the picture. Smaller bubbles = more points.',
                       style: TextStyle(fontSize: 12, color: Color(0xFFcbd5e1))),
                   ],
                 ),
               ),
 
-              // Overlays
               if (_mode == OverlayMode.splash) _buildSplash(),
               if (_mode == OverlayMode.levelup) _buildLevelUp(),
               if (_mode == OverlayMode.gameover) _buildGameOver(),
 
-              // Pause button
               if (_mode == OverlayMode.running)
                 Positioned(
                   right: 12, top: 8 + 78 + 10,
@@ -470,7 +438,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     );
   }
 
-  // Splash cover
   Widget _buildSplash() {
     return Positioned.fill(
       child: Container(
@@ -510,7 +477,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     );
   }
 
-  // Paused overlay
   Widget _buildPaused() {
     return Positioned.fill(
       child: Container(
@@ -540,7 +506,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     );
   }
 
-  // Level-up overlay
   Widget _buildLevelUp() {
     final cheers = ['Great!', 'Nice!', 'Awesome!', 'Woo!', 'YAH!'];
     return Positioned.fill(
@@ -572,7 +537,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     );
   }
 
-  // Game-over overlay
   Widget _buildGameOver() {
     return Positioned.fill(
       child: Container(
@@ -623,7 +587,6 @@ class _GamePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size _) {
-    // Background gradient
     final bg = Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
@@ -632,10 +595,8 @@ class _GamePainter extends CustomPainter {
       ).createShader(Offset.zero & size);
     canvas.drawRect(Offset.zero & size, bg);
 
-    // Bubbles
     for (final b in bubbles) {
       final center = Offset(b.x, b.y);
-      // Glossy bubble gradient
       final grad = RadialGradient(
         center: const Alignment(-0.3, -0.4),
         radius: 0.9,
@@ -647,7 +608,6 @@ class _GamePainter extends CustomPainter {
       final bubblePaint = Paint()..shader = grad;
       canvas.drawCircle(center, b.r, bubblePaint);
 
-      // Highlight
       final hi = Paint()..color = Colors.white.withOpacity(.35);
       canvas.drawOval(
         Rect.fromCenter(center: center.translate(-b.r * .4, -b.r * .6),
@@ -655,11 +615,9 @@ class _GamePainter extends CustomPainter {
         hi,
       );
 
-      // Item drawing inside the bubble
       _drawItem(canvas, center, b.r * 1.4, b.item);
     }
 
-    // Particles
     for (final p in particles) {
       final alpha = p.life.clamp(0, 1).toDouble();
       final color = HSLColor.fromAHSL(alpha, p.hue, .9, .65).toColor();
@@ -667,7 +625,6 @@ class _GamePainter extends CustomPainter {
         final paint = Paint()..color = color;
         canvas.drawCircle(Offset(p.x, p.y), p.size, paint);
       } else {
-        // star
         canvas.save();
         canvas.translate(p.x, p.y);
         canvas.rotate(p.rot);
@@ -678,11 +635,7 @@ class _GamePainter extends CustomPainter {
           final r = (i % 2 == 0) ? outer : inner;
           final a = (i * pi) / spikes - pi / 2;
           final pt = Offset(cos(a) * r, sin(a) * r);
-          if (i == 0) {
-            path.moveTo(pt.dx, pt.dy);
-          } else {
-            path.lineTo(pt.dx, pt.dy);
-          }
+          if (i == 0) path.moveTo(pt.dx, pt.dy); else path.lineTo(pt.dx, pt.dy);
         }
         path.close();
         final paint = Paint()..color = color;
@@ -696,146 +649,5 @@ class _GamePainter extends CustomPainter {
   bool shouldRepaint(covariant _GamePainter old) =>
       old.bubbles != bubbles || old.particles != particles || old.progress != progress || old.target != target;
 
-  // Cartoon item drawings (very lightweight, no image assets required)
   void _drawItem(Canvas canvas, Offset c, double s, ItemKind k) {
-    final stroke = Paint()
-      ..color = const Color(0xFF1f2937)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
-      ..strokeJoin = StrokeJoin.round
-      ..strokeCap = StrokeCap.round;
-
-    switch (k) {
-      case ItemKind.apple:
-        final red = Paint()..color = const Color(0xFFef4444);
-        canvas.drawOval(Rect.fromCenter(center: c, width: s * .7, height: s * .8), red);
-        final leaf = Paint()..color = const Color(0xFF16a34a);
-        canvas.drawOval(Rect.fromCenter(center: c.translate(s * .1, -s * .4), width: s * .36, height: s * .2), leaf);
-        canvas.drawLine(c.translate(0, -s * .45), c.translate(0, -s * .6), stroke);
-        canvas.drawOval(Rect.fromCenter(center: c, width: s * .7, height: s * .8), stroke);
-        break;
-      case ItemKind.ball:
-        final white = Paint()..color = Colors.white;
-        canvas.drawCircle(c, s * .38, white);
-        final colors = [0xFFF59E0B, 0xFF3B82F6, 0xFF10B981, 0xFFEF4444].map((e) => Paint()..color = Color(e));
-        double start = 0;
-        for (final p in colors) {
-          final path = Path()..moveTo(c.dx, c.dy);
-          path.arcTo(Rect.fromCircle(center: c, radius: s * .38), start, pi / 2, false);
-          path.close();
-          canvas.drawPath(path, p);
-          start += pi / 2;
-        }
-        canvas.drawCircle(c, s * .38, stroke);
-        break;
-      case ItemKind.star:
-        final yellow = Paint()..color = const Color(0xFFFACC15);
-        final path = Path();
-        const spikes = 5;
-        final r1 = s * .38, r2 = s * .18;
-        for (int i = 0; i < spikes * 2; i++) {
-          final r = i.isEven ? r1 : r2;
-          final a = (i * pi) / spikes - pi / 2;
-          final pt = Offset(c.dx + cos(a) * r, c.dy + sin(a) * r);
-          if (i == 0) path.moveTo(pt.dx, pt.dy); else path.lineTo(pt.dx, pt.dy);
-        }
-        path.close(); canvas.drawPath(path, yellow); canvas.drawPath(path, stroke);
-        break;
-      case ItemKind.car:
-        final body = Paint()..color = const Color(0xFF60a5fa);
-        final rect = RRect.fromRectAndRadius(
-            Rect.fromCenter(center: c.translate(0, s * .05), width: s * .8, height: s * .35),
-            const Radius.circular(8));
-        canvas.drawRRect(rect, body); canvas.drawRRect(rect, stroke);
-        final wheel = Paint()..color = const Color(0xFF111827);
-        canvas.drawCircle(c.translate(-s * .22, s * .22), s * .12, wheel);
-        canvas.drawCircle(c.translate( s * .22, s * .22), s * .12, wheel);
-        break;
-      case ItemKind.house:
-        final base = Paint()..color = const Color(0xFFF87171);
-        final brect = RRect.fromRectAndRadius(
-            Rect.fromCenter(center: c.translate(0, s * .14), width: s * .7, height: s * .45),
-            const Radius.circular(6));
-        canvas.drawRRect(brect, base); canvas.drawRRect(brect, stroke);
-        final roof = Paint()..color = const Color(0xFF92400e);
-        final path = Path()
-          ..moveTo(c.dx - s * .4, c.dy - s * .1)
-          ..lineTo(c.dx, c.dy - s * .45)
-          ..lineTo(c.dx + s * .4, c.dy - s * .1)
-          ..close();
-        canvas.drawPath(path, roof); canvas.drawPath(path, stroke);
-        break;
-      case ItemKind.fish:
-        final body = Paint()..color = const Color(0xFF34d399);
-        canvas.drawOval(Rect.fromCenter(center: c, width: s * .68, height: s * .44), body);
-        final tail = Path()
-          ..moveTo(c.dx - s * .34, c.dy)
-          ..lineTo(c.dx - s * .5, c.dy - s * .15)
-          ..lineTo(c.dx - s * .5, c.dy + s * .15)
-          ..close();
-        canvas.drawPath(tail, body); canvas.drawOval(Rect.fromCenter(center: c, width: s * .68, height: s * .44), stroke);
-        break;
-    }
-  }
-}
-
-class _TargetPreview extends StatelessWidget {
-  const _TargetPreview({required this.kind});
-  final ItemKind kind;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 64, height: 64,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        border: Border.all(color: const Color(0xFF334155)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: CustomPaint(
-        painter: _TargetPainter(kind),
-      ),
-    );
-  }
-}
-
-class _TargetPainter extends CustomPainter {
-  _TargetPainter(this.kind);
-  final ItemKind kind;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = Offset(size.width/2, size.height/2 + 2);
-    final s = size.shortestSide * .9;
-    _GamePainter(size: size, bubbles: const [], particles: const [], target: kind, progress: 0)
-        ._drawItem(canvas, c, s, kind);
-  }
-
-  @override
-  bool shouldRepaint(covariant _TargetPainter oldDelegate) => oldDelegate.kind != kind;
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.icon, required this.label, required this.value});
-  final String icon, label, value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a).withOpacity(.7),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF334155)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('$icon $value', style: const TextStyle(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(fontSize: 10, color: Color(0xFFcbd5e1))),
-        ],
-      ),
-    );
-  }
-}
+    final stroke =
