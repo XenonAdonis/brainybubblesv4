@@ -1,7 +1,6 @@
 name: brainybubbles
-description: Brainy Bubbles Flutter starter
-publish_to: 'none'
-
+description: Brainy Bubbles Flutter app (web)
+publish_to: "none"
 version: 1.0.0+1
 
 environment:
@@ -23,10 +22,3 @@ flutter:
     - assets/icons/
     - assets/images/
     - assets/audio/
-
-assets:
-  - assets/audio/brainy_bubbles_bg.mp3
-dependencies:
-  audioplayers: ^5.2.0
-  shared_preferences: ^2.2.2
-
