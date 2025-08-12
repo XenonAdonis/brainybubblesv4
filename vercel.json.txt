@@ -1,0 +1,8 @@
+{
+  "framework": "other",
+  "buildCommand": "",
+  "outputDirectory": "web_dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
