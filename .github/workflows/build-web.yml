@@ -1,8 +1,8 @@
-name: Build Flutter Web (for Vercel)
+name: Build Flutter Web (simple)
 
 on:
   push:
-    branches: [ main ]   # change to [ master ] if your default branch is master
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -23,8 +23,8 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Build web (release, canvaskit)
-        run: flutter build web --release --web-renderer canvaskit
+      - name: Build web (release)
+        run: flutter build web --release
 
       - name: Prepare deploy folder (web_dist)
         run: |
