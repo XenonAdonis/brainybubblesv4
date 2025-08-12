@@ -1,0 +1,41 @@
+name: Build Flutter Web (for Vercel)
+
+on:
+  push:
+    branches: [ main ]   # change to [ master ] if your default branch is master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build web (release, canvaskit)
+        run: flutter build web --release --web-renderer canvaskit
+
+      - name: Prepare deploy folder (web_dist)
+        run: |
+          rm -rf web_dist
+          mkdir -p web_dist
+          cp -r build/web/* web_dist/
+
+      - name: Commit built files (web_dist)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: build web to web_dist [skip ci]"
+          commit_user_name: "github-actions"
+          commit_user_email: "actions@users.noreply.github.com"
+          file_pattern: web_dist/**
