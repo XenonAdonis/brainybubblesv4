@@ -1,0 +1,10 @@
+Brainy Bubbles v0.2.0
+
+Highlights:
+- New Settings screen (Fewer Bubbles, spawn speeds, ramp duration, max bubbles).
+- Background music toggle (persists).
+
+Upgrade guide:
+1) Merge the `lib/` and `assets/` directories into your Flutter project.
+2) Verify `pubspec.yaml` dependencies and assets entries (see README).
+3) Commit, tag as `v0.2.0`, and create a GitHub Release.
