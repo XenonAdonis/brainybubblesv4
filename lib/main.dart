@@ -1,12 +1,12 @@
 // Brainy Bubbles – Flutter Web test build (Vercel-ready)
-// Splash screen, target-matching bubbles, goal/timer, level-up “YAH!”,
+// Splash screen, target matching, timer/goal, level-ups (“YAH!”),
 // starry pop effects, badges, reduced-motion, music toggle (safe if asset missing).
 
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' show Ticker; // <-- fixes "Ticker not found"
+import 'package:flutter/scheduler.dart' show Ticker; // needed for createTicker
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -568,7 +568,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   }
 }
 
-// --------------------------- Painters ---------------------------------------
+// --------------------------- Painters + Widgets -----------------------------
 
 class _GamePainter extends CustomPainter {
   _GamePainter({
@@ -587,6 +587,7 @@ class _GamePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size _) {
+    // Background gradient
     final bg = Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
@@ -595,6 +596,7 @@ class _GamePainter extends CustomPainter {
       ).createShader(Offset.zero & size);
     canvas.drawRect(Offset.zero & size, bg);
 
+    // Bubbles
     for (final b in bubbles) {
       final center = Offset(b.x, b.y);
       final grad = RadialGradient(
@@ -608,6 +610,7 @@ class _GamePainter extends CustomPainter {
       final bubblePaint = Paint()..shader = grad;
       canvas.drawCircle(center, b.r, bubblePaint);
 
+      // Highlight gloss
       final hi = Paint()..color = Colors.white.withOpacity(.35);
       canvas.drawOval(
         Rect.fromCenter(center: center.translate(-b.r * .4, -b.r * .6),
@@ -615,9 +618,11 @@ class _GamePainter extends CustomPainter {
         hi,
       );
 
+      // Item inside bubble
       _drawItem(canvas, center, b.r * 1.4, b.item);
     }
 
+    // Particles
     for (final p in particles) {
       final alpha = p.life.clamp(0, 1).toDouble();
       final color = HSLColor.fromAHSL(alpha, p.hue, .9, .65).toColor();
@@ -649,5 +654,154 @@ class _GamePainter extends CustomPainter {
   bool shouldRepaint(covariant _GamePainter old) =>
       old.bubbles != bubbles || old.particles != particles || old.progress != progress || old.target != target;
 
+  // Cartoon item drawings (no external images)
   void _drawItem(Canvas canvas, Offset c, double s, ItemKind k) {
-    final stroke =
+    final stroke = Paint()
+      ..color = const Color(0xFF1f2937)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+
+    switch (k) {
+      case ItemKind.apple:
+        final red = Paint()..color = const Color(0xFFef4444);
+        canvas.drawOval(Rect.fromCenter(center: c, width: s * .7, height: s * .8), red);
+        final leaf = Paint()..color = const Color(0xFF16a34a);
+        canvas.drawOval(Rect.fromCenter(center: c.translate(s * .1, -s * .4), width: s * .36, height: s * .2), leaf);
+        canvas.drawLine(c.translate(0, -s * .45), c.translate(0, -s * .6), stroke);
+        canvas.drawOval(Rect.fromCenter(center: c, width: s * .7, height: s * .8), stroke);
+        break;
+
+      case ItemKind.ball:
+        final white = Paint()..color = Colors.white;
+        canvas.drawCircle(c, s * .38, white);
+        final colors = [0xFFF59E0B, 0xFF3B82F6, 0xFF10B981, 0xFFEF4444].map((e) => Paint()..color = Color(e)).toList();
+        double start = 0;
+        for (final p in colors) {
+          final path = Path()..moveTo(c.dx, c.dy);
+          path.arcTo(Rect.fromCircle(center: c, radius: s * .38), start, pi / 2, false);
+          path.close();
+          canvas.drawPath(path, p);
+          start += pi / 2;
+        }
+        canvas.drawCircle(c, s * .38, stroke);
+        break;
+
+      case ItemKind.star:
+        final yellow = Paint()..color = const Color(0xFFFACC15);
+        final path = Path();
+        const spikes = 5;
+        final r1 = s * .38, r2 = s * .18;
+        for (int i = 0; i < spikes * 2; i++) {
+          final r = i.isEven ? r1 : r2;
+          final a = (i * pi) / spikes - pi / 2;
+          final pt = Offset(c.dx + cos(a) * r, c.dy + sin(a) * r);
+          if (i == 0) path.moveTo(pt.dx, pt.dy); else path.lineTo(pt.dx, pt.dy);
+        }
+        path.close(); canvas.drawPath(path, yellow); canvas.drawPath(path, stroke);
+        break;
+
+      case ItemKind.car:
+        final body = Paint()..color = const Color(0xFF60a5fa);
+        final rect = RRect.fromRectAndRadius(
+            Rect.fromCenter(center: c.translate(0, s * .05), width: s * .8, height: s * .35),
+            const Radius.circular(8));
+        canvas.drawRRect(rect, body); canvas.drawRRect(rect, stroke);
+        final wheel = Paint()..color = const Color(0xFF111827);
+        canvas.drawCircle(c.translate(-s * .22, s * .22), s * .12, wheel);
+        canvas.drawCircle(c.translate( s * .22, s * .22), s * .12, wheel);
+        break;
+
+      case ItemKind.house:
+        final base = Paint()..color = const Color(0xFFF87171);
+        final brect = RRect.fromRectAndRadius(
+            Rect.fromCenter(center: c.translate(0, s * .14), width: s * .7, height: s * .45),
+            const Radius.circular(6));
+        canvas.drawRRect(brect, base); canvas.drawRRect(brect, stroke);
+        final roof = Paint()..color = const Color(0xFF92400e);
+        final path = Path()
+          ..moveTo(c.dx - s * .4, c.dy - s * .1)
+          ..lineTo(c.dx, c.dy - s * .45)
+          ..lineTo(c.dx + s * .4, c.dy - s * .1)
+          ..close();
+        canvas.drawPath(path, roof); canvas.drawPath(path, stroke);
+        break;
+
+      case ItemKind.fish:
+        final body = Paint()..color = const Color(0xFF34d399);
+        canvas.drawOval(Rect.fromCenter(center: c, width: s * .68, height: s * .44), body);
+        final tail = Path()
+          ..moveTo(c.dx - s * .34, c.dy)
+          ..lineTo(c.dx - s * .5, c.dy - s * .15)
+          ..lineTo(c.dx - s * .5, c.dy + s * .15)
+          ..close();
+        canvas.drawPath(tail, body);
+        canvas.drawOval(Rect.fromCenter(center: c, width: s * .68, height: s * .44), stroke);
+        break;
+    }
+  }
+}
+
+class _TargetPreview extends StatelessWidget {
+  const _TargetPreview({required this.kind});
+  final ItemKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 64, height: 64,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        border: Border.all(color: const Color(0xFF334155)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: CustomPaint(
+        painter: _TargetPainter(kind),
+      ),
+    );
+  }
+}
+
+class _TargetPainter extends CustomPainter {
+  _TargetPainter(this.kind);
+  final ItemKind kind;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width/2, size.height/2 + 2);
+    final s = size.shortestSide * .9;
+    _GamePainter(size: size, bubbles: const [], particles: const [], target: kind, progress: 0)
+        ._drawItem(canvas, c, s, kind);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TargetPainter oldDelegate) => oldDelegate.kind != kind;
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.icon, required this.label, required this.value});
+  final String icon, label, value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a).withOpacity(.7),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$icon $value', style: const TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          const Text('',
+              style: TextStyle(fontSize: 0)), // spacer to keep height stable on tiny screens
+          Text(label, style: const TextStyle(fontSize: 10, color: Color(0xFFcbd5e1))),
+        ],
+      ),
+    );
+  }
+}
