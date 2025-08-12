@@ -1,175 +1,89 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
-import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  runApp(const BrainyBubblesApp());
+  runApp(BrainyBubblesApp());
 }
 
-class BrainyBubblesApp extends StatelessWidget {
-  const BrainyBubblesApp({super.key});
-
+class BrainyBubblesApp extends StatefulWidget {
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Brainy Bubbles',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: const BrainyBubblesHome(),
-    );
-  }
+  _BrainyBubblesAppState createState() => _BrainyBubblesAppState();
 }
 
-class BrainyBubblesHome extends StatefulWidget {
-  const BrainyBubblesHome({super.key});
-
-  @override
-  State<BrainyBubblesHome> createState() => _BrainyBubblesHomeState();
-}
-
-class _BrainyBubblesHomeState extends State<BrainyBubblesHome> {
-  final Random _random = Random();
-  List<Offset> _bubbles = [];
-  Timer? _bubbleTimer;
-  int _score = 0;
-  bool _lessBubbles = false;
-  bool _musicOn = true;
-  final AudioPlayer _audioPlayer = AudioPlayer();
+class _BrainyBubblesAppState extends State<BrainyBubblesApp> {
+  late AudioPlayer _audioPlayer;
+  bool _isMusicOn = true;
 
   @override
   void initState() {
     super.initState();
+    _audioPlayer = AudioPlayer();
     _loadSettings();
-    _startGame();
-    _playMusic();
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
+    SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
-      _lessBubbles = prefs.getBool('lessBubbles') ?? false;
-      _musicOn = prefs.getBool('musicOn') ?? true;
+      _isMusicOn = prefs.getBool('musicOn') ?? true;
     });
-  }
-
-  Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    prefs.setBool('lessBubbles', _lessBubbles);
-    prefs.setBool('musicOn', _musicOn);
-  }
-
-  void _playMusic() async {
-    if (_musicOn) {
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(AssetSource('audio/brainy_bubbles_bg.mp3'));
-    } else {
-      await _audioPlayer.stop();
+    if (_isMusicOn) {
+      _playMusic();
     }
   }
 
-  void _startGame() {
-    _score = 0;
-    _bubbles = [];
-    _bubbleTimer?.cancel();
-
-    // Faster spawn rate at start
-    final spawnRate = _lessBubbles ? 1200 : 600;
-
-    _bubbleTimer = Timer.periodic(Duration(milliseconds: spawnRate), (timer) {
-      setState(() {
-        _bubbles.add(Offset(
-          _random.nextDouble(),
-          _random.nextDouble(),
-        ));
-      });
-    });
+  Future<void> _saveSettings() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.setBool('musicOn', _isMusicOn);
   }
 
-  void _popBubble(int index) {
+  void _playMusic() {
+    _audioPlayer.setReleaseMode(ReleaseMode.loop);
+    _audioPlayer.play(AssetSource('audio/background_music.mp3'));
+  }
+
+  void _stopMusic() {
+    _audioPlayer.stop();
+  }
+
+  void _toggleMusic() {
     setState(() {
-      _bubbles.removeAt(index);
-      _score++;
+      _isMusicOn = !_isMusicOn;
+      if (_isMusicOn) {
+        _playMusic();
+      } else {
+        _stopMusic();
+      }
+      _saveSettings();
     });
   }
 
   @override
   void dispose() {
-    _bubbleTimer?.cancel();
     _audioPlayer.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Brainy Bubbles'),
-        actions: [
-          Row(
-            children: [
-              const Text("Less Bubbles"),
-              Switch(
-                value: _lessBubbles,
-                onChanged: (value) {
-                  setState(() {
-                    _lessBubbles = value;
-                  });
-                  _saveSettings();
-                  _startGame();
-                },
-              ),
-            ],
+    return MaterialApp(
+      title: 'Brainy Bubbles',
+      home: Scaffold(
+        appBar: AppBar(
+          title: Text('Brainy Bubbles'),
+          actions: [
+            IconButton(
+              icon: Icon(_isMusicOn ? Icons.music_note : Icons.music_off),
+              onPressed: _toggleMusic,
+            )
+          ],
+        ),
+        body: Center(
+          child: Text(
+            '🎮 Brainy Bubbles Game Here 🎮',
+            style: TextStyle(fontSize: 24),
           ),
-          Row(
-            children: [
-              const Text("Music"),
-              Switch(
-                value: _musicOn,
-                onChanged: (value) {
-                  setState(() {
-                    _musicOn = value;
-                  });
-                  _saveSettings();
-                  _playMusic();
-                },
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          ..._bubbles.asMap().entries.map((entry) {
-            final index = entry.key;
-            final pos = entry.value;
-            return Positioned(
-              left: pos.dx * MediaQuery.of(context).size.width,
-              top: pos.dy * MediaQuery.of(context).size.height,
-              child: GestureDetector(
-                onTap: () => _popBubble(index),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.blueAccent,
-                  ),
-                ),
-              ),
-            );
-          }),
-          Positioned(
-            bottom: 20,
-            left: 20,
-            child: Text(
-              'Score: $_score',
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-          )
-        ],
+        ),
       ),
     );
   }
