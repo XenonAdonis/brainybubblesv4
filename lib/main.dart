@@ -1,12 +1,25 @@
-// Brainy Bubbles – Flutter Web test build (Vercel-ready)
+// Brainy Bubbles – Flutter Web (Vercel-ready)
 // Splash screen, target matching, timer/goal, level-ups (“YAH!”),
-// starry pop effects, badges, reduced-motion, music toggle (safe if asset missing).
+// starry pop effects, badges, reduced-motion, music toggle.
+// Music auto-starts after "Tap to Start" (user gesture), pop/cheer preloaded.
+//
+// Audio assets expected (add or leave folder with .gitkeep to skip silently):
+//   assets/audio/brainy_bubbles_bg.mp3
+//   assets/audio/pop_hi.mp3
+//   assets/audio/pop_lo.mp3
+//   assets/audio/cheer_triple.mp3
+//
+// pubspec.yaml must include:
+// flutter:
+//   uses-material-design: true
+//   assets:
+//     - assets/audio/
 
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' show Ticker; // needed for createTicker
+import 'package:flutter/scheduler.dart' show Ticker; // for createTicker
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -78,14 +91,17 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
+  // Frame ticker
   late final Ticker _ticker;
   double _lastTs = 0;
 
+  // World
   final List<Bubble> _bubbles = [];
   final List<Particle> _particles = [];
   final Random _rng = Random();
   Size _canvasSize = Size.zero;
 
+  // Flow / HUD
   OverlayMode _mode = OverlayMode.splash;
   ItemKind _target = ItemKind.values[0];
   int _level = 1;
@@ -94,15 +110,61 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   int _high = 0;
   int _sessionBest = 0;
 
+  // Timers
   double _timeLeft = 45;
   double _spawnAccumMs = 0;
 
+  // Settings
   bool _reducedMotion = false;
   bool _musicOn = true;
 
-  final AudioPlayer _synth = AudioPlayer(); // cheer
-  final AudioPlayer _popper = AudioPlayer(); // pop
-  final AudioPlayer _bg = AudioPlayer();     // bg loop
+  // -------------------------- Audio (preloaded) ------------------------------
+  // Players: bg loop + effects
+  final AudioPlayer _bg = AudioPlayer()..setReleaseMode(ReleaseMode.loop);
+  final AudioPlayer _popHi = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
+  final AudioPlayer _popLo = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
+  final AudioPlayer _cheer = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
+
+  // Only (pre)load audio after first user gesture (browser policy)
+  bool _audioArmed = false;
+
+  // Preload sources and start bg (if enabled) after the Start tap.
+  Future<void> _initAudioAfterGesture() async {
+    if (_audioArmed) return;
+    _audioArmed = true;
+    try {
+      // NOTE: AssetSource path is relative to your assets root (no leading "assets/")
+      await Future.wait([
+        _popHi.setSource(AssetSource('audio/pop_hi.mp3')),
+        _popLo.setSource(AssetSource('audio/pop_lo.mp3')),
+        _cheer.setSource(AssetSource('audio/cheer_triple.mp3')),
+        _bg.setSource(AssetSource('audio/brainy_bubbles_bg.mp3')), // rename here if you use a different file
+      ]);
+      if (_musicOn) {
+        await _bg.setVolume(0.6);
+        await _bg.resume(); // begin loop immediately after the tap
+      }
+    } catch (_) {
+      // Missing assets or blocked by platform: ignore silently
+    }
+  }
+
+  Future<void> _playPop(bool target) async {
+    try {
+      final p = target ? _popHi : _popLo;
+      await p.seek(Duration.zero);
+      await p.resume();
+    } catch (_) {}
+  }
+
+  Future<void> _playCheer() async {
+    try {
+      await _cheer.seek(Duration.zero);
+      await _cheer.resume();
+    } catch (_) {}
+  }
+
+  // -------------------------- Lifecycle -------------------------------------
 
   @override
   void initState() {
@@ -115,8 +177,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   void dispose() {
     _ticker.dispose();
     _bg.dispose();
-    _synth.dispose();
-    _popper.dispose();
+    _popHi.dispose();
+    _popLo.dispose();
+    _cheer.dispose();
     super.dispose();
   }
 
@@ -129,7 +192,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _reducedMotion = p.getBool('bb_rm') ?? false;
       _musicOn = p.getBool('bb_music') ?? true;
     });
-    _applyMusic();
+    // We do NOT start music here—wait for the first user tap (Start) via _initAudioAfterGesture.
   }
 
   Future<void> _savePrefs() async {
@@ -139,43 +202,18 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     await p.setBool('bb_music', _musicOn);
   }
 
-  // -------------------------- Tuning (fixed types) --------------------------
+  // -------------------------- Tuning (types fixed) --------------------------
 
   int _goalFor(int lvl) => (320 * pow(1.32, (lvl - 1))).round();
   double _timeFor(int lvl) => _clampD(52 - (lvl - 1) * 2.5, 24, 52);
   double _spawnMsFor(int lvl) => _clampD(420 - (lvl - 1) * 35, 90, 420);
   int _spawnBatchFor(int lvl) => _clampI(1 + (lvl ~/ 2), 1, 6);
 
-  // -------------------------- Helpers (fixed types) -------------------------
+  // -------------------------- Helpers ---------------------------------------
 
   double _clampD(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
   int _clampI(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
   double _rand(double a, double b) => _rng.nextDouble() * (b - a) + a;
-
-  // Audio safe wrappers
-  Future<void> _playPop(bool target) async {
-    try {
-      await _popper.play(AssetSource(target ? 'audio/pop_hi.mp3' : 'audio/pop_lo.mp3'));
-    } catch (_) {}
-  }
-
-  Future<void> _playCheer() async {
-    try {
-      await _synth.play(AssetSource('audio/cheer_triple.mp3'));
-    } catch (_) {}
-  }
-
-  Future<void> _applyMusic() async {
-    if (_musicOn) {
-      try {
-        await _bg.setReleaseMode(ReleaseMode.loop);
-        await _bg.play(AssetSource('audio/background_music.mp3'));
-      } catch (_) {}
-    } else {
-      try { await _bg.stop(); } catch (_) {}
-    }
-    _savePrefs();
-  }
 
   // -------------------------- Game Flow -------------------------------------
 
@@ -191,6 +229,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _particles.clear();
       _spawnAccumMs = 0;
     });
+
+    // User just tapped: arm audio + start bg if enabled
+    _initAudioAfterGesture();
   }
 
   void _advanceLevel() {
@@ -242,7 +283,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       if (sqrt(dx*dx + dy*dy) <= b.r) {
         final hitTarget = b.item == _target;
         if (hitTarget) {
-          final base = (_clampD(100 - b.r, 20, 95)).round(); // fixed types
+          final base = (_clampD(100 - b.r, 20, 95)).round();
           _score += base;
           _levelScore += base;
           _emitStarTrail(b.x, b.y, count: _reducedMotion ? 14 : 28);
@@ -346,13 +387,29 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       appBar: AppBar(
         title: const Text('Brainy Bubbles'),
         actions: [
+          // Music toggle (persists; starts bg if turned on later)
           Row(children: [
             const Text('Music', style: TextStyle(fontSize: 12)),
-            Switch(value: _musicOn, onChanged: (_) { setState(()=>_musicOn=!_musicOn); _applyMusic(); }),
+            Switch(
+              value: _musicOn,
+              onChanged: (v) async {
+                setState(() => _musicOn = v);
+                await _savePrefs();
+                if (v) {
+                  await _initAudioAfterGesture(); // ensure armed, then bg resumes
+                } else {
+                  try { await _bg.stop(); } catch (_) {}
+                }
+              },
+            ),
           ]),
+          // Reduced motion toggle
           Row(children: [
             const Text('Gentle', style: TextStyle(fontSize: 12)),
-            Switch(value: _reducedMotion, onChanged: (v) { setState(()=>_reducedMotion=v); _savePrefs(); }),
+            Switch(
+              value: _reducedMotion,
+              onChanged: (v) { setState(()=>_reducedMotion=v); _savePrefs(); },
+            ),
             const SizedBox(width: 8),
           ]),
         ],
@@ -363,6 +420,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 
           return Stack(
             children: [
+              // Game canvas
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapDown: (d) { if (_mode == OverlayMode.running) _popAt(d.localPosition); },
@@ -378,6 +436,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
               ),
 
+              // HUD (badges + target)
               Positioned(
                 left: 12, right: 12, top: 8,
                 child: Row(
@@ -395,6 +454,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
               ),
 
+              // Progress + hint
               Positioned(
                 left: 12, right: 12, top: 78,
                 child: Column(
@@ -417,6 +477,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
               ),
 
+              // Overlays
               if (_mode == OverlayMode.splash) _buildSplash(),
               if (_mode == OverlayMode.levelup) _buildLevelUp(),
               if (_mode == OverlayMode.gameover) _buildGameOver(),
@@ -467,7 +528,18 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ]),
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   const Text('Music', style: TextStyle(fontSize: 12, color: Color(0xFFcbd5e1))),
-                  Switch(value: _musicOn, onChanged: (v){ setState(()=>_musicOn=v); _applyMusic(); }),
+                  Switch(
+                    value: _musicOn,
+                    onChanged: (v) async {
+                      setState(()=>_musicOn=v);
+                      await _savePrefs();
+                      if (v) {
+                        await _initAudioAfterGesture();
+                      } else {
+                        try { await _bg.stop(); } catch (_) {}
+                      }
+                    },
+                  ),
                 ]),
               ],
             ),
@@ -610,7 +682,7 @@ class _GamePainter extends CustomPainter {
       final bubblePaint = Paint()..shader = grad;
       canvas.drawCircle(center, b.r, bubblePaint);
 
-      // Highlight gloss
+      // Gloss highlight
       final hi = Paint()..color = Colors.white.withOpacity(.35);
       canvas.drawOval(
         Rect.fromCenter(center: center.translate(-b.r * .4, -b.r * .6),
@@ -618,7 +690,7 @@ class _GamePainter extends CustomPainter {
         hi,
       );
 
-      // Item inside bubble
+      // Inside item
       _drawItem(canvas, center, b.r * 1.4, b.item);
     }
 
@@ -797,8 +869,6 @@ class _Badge extends StatelessWidget {
         children: [
           Text('$icon $value', style: const TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          const Text('',
-              style: TextStyle(fontSize: 0)), // spacer to keep height stable on tiny screens
           Text(label, style: const TextStyle(fontSize: 10, color: Color(0xFFcbd5e1))),
         ],
       ),
