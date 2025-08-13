@@ -1,15 +1,16 @@
 // Brainy Bubbles – Flutter Web (Vercel-ready)
-// Splash screen, target matching, timer/goal, level-ups (“YAH!”),
-// starry pop effects, badges, reduced-motion, music toggle.
-// Music auto-starts after "Tap to Start" (user gesture), pop/cheer preloaded.
+// Splash screen, target match, timer/goal, level-ups, star particles,
+// reduced-motion, music toggle. Music now starts reliably after Start
+// and on subsequent resumes/level-ups. "Best" badge removed;
+// only persistent High score shown on Game Over.
 //
-// Audio assets expected (add or leave folder with .gitkeep to skip silently):
+// Audio assets expected (or keep folder with .gitkeep):
 //   assets/audio/brainy_bubbles_bg.mp3
 //   assets/audio/pop_hi.mp3
 //   assets/audio/pop_lo.mp3
 //   assets/audio/cheer_triple.mp3
 //
-// pubspec.yaml must include:
+// pubspec.yaml:
 // flutter:
 //   uses-material-design: true
 //   assets:
@@ -107,8 +108,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   int _level = 1;
   int _score = 0;
   int _levelScore = 0;
-  int _high = 0;
-  int _sessionBest = 0;
+  int _high = 0; // persistent high score only
 
   // Timers
   double _timeLeft = 45;
@@ -119,34 +119,48 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   bool _musicOn = true;
 
   // -------------------------- Audio (preloaded) ------------------------------
-  // Players: bg loop + effects
   final AudioPlayer _bg = AudioPlayer()..setReleaseMode(ReleaseMode.loop);
   final AudioPlayer _popHi = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
   final AudioPlayer _popLo = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
   final AudioPlayer _cheer = AudioPlayer()..setReleaseMode(ReleaseMode.stop);
 
-  // Only (pre)load audio after first user gesture (browser policy)
-  bool _audioArmed = false;
+  bool _audioArmed = false; // only load sources after first user gesture
 
   // Preload sources and start bg (if enabled) after the Start tap.
   Future<void> _initAudioAfterGesture() async {
     if (_audioArmed) return;
     _audioArmed = true;
     try {
-      // NOTE: AssetSource path is relative to your assets root (no leading "assets/")
+      // NOTE: AssetSource is relative to your assets root (no "assets/" prefix needed here in latest audioplayers).
       await Future.wait([
         _popHi.setSource(AssetSource('audio/pop_hi.mp3')),
         _popLo.setSource(AssetSource('audio/pop_lo.mp3')),
         _cheer.setSource(AssetSource('audio/cheer_triple.mp3')),
-        _bg.setSource(AssetSource('audio/brainy_bubbles_bg.mp3')), // rename here if you use a different file
+        _bg.setSource(AssetSource('audio/brainy_bubbles_bg.mp3')),
       ]);
       if (_musicOn) {
         await _bg.setVolume(0.6);
         await _bg.resume(); // begin loop immediately after the tap
       }
     } catch (_) {
-      // Missing assets or blocked by platform: ignore silently
+      // Missing assets or platform blocks: ignore silently
     }
+  }
+
+  // Guarantee bg loop is playing when it should (covers resumes/level-ups/second loads)
+  Future<void> _maybeStartBg() async {
+    if (!_musicOn) return;
+    try {
+      if (!_audioArmed) {
+        // First gesture case: arm + start bg inside
+        await _initAudioAfterGesture();
+        return;
+      }
+      await _bg.setVolume(0.6);
+      if (_bg.state != PlayerState.playing) {
+        await _bg.resume();
+      }
+    } catch (_) {}
   }
 
   Future<void> _playPop(bool target) async {
@@ -192,7 +206,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _reducedMotion = p.getBool('bb_rm') ?? false;
       _musicOn = p.getBool('bb_music') ?? true;
     });
-    // We do NOT start music here—wait for the first user tap (Start) via _initAudioAfterGesture.
+    // Do not start music here—wait for first user tap via _initAudioAfterGesture.
   }
 
   Future<void> _savePrefs() async {
@@ -202,14 +216,12 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     await p.setBool('bb_music', _musicOn);
   }
 
-  // -------------------------- Tuning (types fixed) --------------------------
+  // -------------------------- Tuning ----------------------------------------
 
   int _goalFor(int lvl) => (320 * pow(1.32, (lvl - 1))).round();
   double _timeFor(int lvl) => _clampD(52 - (lvl - 1) * 2.5, 24, 52);
   double _spawnMsFor(int lvl) => _clampD(420 - (lvl - 1) * 35, 90, 420);
   int _spawnBatchFor(int lvl) => _clampI(1 + (lvl ~/ 2), 1, 6);
-
-  // -------------------------- Helpers ---------------------------------------
 
   double _clampD(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
   int _clampI(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
@@ -217,7 +229,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 
   // -------------------------- Game Flow -------------------------------------
 
-  void _startRun() {
+  Future<void> _startRun() async {
     setState(() {
       _score = 0;
       _level = 1;
@@ -231,10 +243,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     });
 
     // User just tapped: arm audio + start bg if enabled
-    _initAudioAfterGesture();
+    await _initAudioAfterGesture();
+    await _maybeStartBg();
   }
 
-  void _advanceLevel() {
+  Future<void> _advanceLevel() async {
     setState(() {
       _level++;
       _levelScore = 0;
@@ -245,12 +258,12 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _particles.clear();
       _spawnAccumMs = 0;
     });
+    await _maybeStartBg();
   }
 
   void _failLevel() {
     setState(() {
       _mode = OverlayMode.gameover;
-      _sessionBest = max(_sessionBest, _score);
       _high = max(_high, _score);
     });
     _savePrefs();
@@ -396,7 +409,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 setState(() => _musicOn = v);
                 await _savePrefs();
                 if (v) {
-                  await _initAudioAfterGesture(); // ensure armed, then bg resumes
+                  await _initAudioAfterGesture(); // arms & starts loop on first enable
+                  await _maybeStartBg();          // ensures it’s actually playing
                 } else {
                   try { await _bg.stop(); } catch (_) {}
                 }
@@ -436,7 +450,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
               ),
 
-              // HUD (badges + target)
+              // HUD (target + minimal badges: Points, Time)
               Positioned(
                 left: 12, right: 12, top: 8,
                 child: Row(
@@ -445,8 +459,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                     _TargetPreview(kind: _target),
                     Row(children: [
                       _Badge(icon: '⭐', label: 'Points', value: '$_score'),
-                      const SizedBox(width: 8),
-                      _Badge(icon: '🏆', label: 'Best', value: '$_sessionBest'),
                       const SizedBox(width: 8),
                       _Badge(icon: '⏱', label: 'Time', value: '${_timeLeft.ceil()}s'),
                     ]),
@@ -486,7 +498,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 Positioned(
                   right: 12, top: 8 + 78 + 10,
                   child: FilledButton.tonal(
-                    onPressed: ()=>setState(()=>_mode=OverlayMode.paused),
+                    onPressed: () async {
+                      setState(()=>_mode=OverlayMode.paused);
+                    },
                     child: const Text('Pause'),
                   ),
                 ),
@@ -520,7 +534,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 const Text('Tap to think fast & pop the matching picture.',
                     style: TextStyle(color: Color(0xFFcbd5e1))),
                 const SizedBox(height: 16),
-                FilledButton(onPressed: _startRun, child: const Text('Tap to Start')),
+                FilledButton(onPressed: () async { await _startRun(); }, child: const Text('Tap to Start')),
                 const SizedBox(height: 10),
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   const Text('Gentle motion', style: TextStyle(fontSize: 12, color: Color(0xFFcbd5e1))),
@@ -535,6 +549,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                       await _savePrefs();
                       if (v) {
                         await _initAudioAfterGesture();
+                        await _maybeStartBg();
                       } else {
                         try { await _bg.stop(); } catch (_) {}
                       }
@@ -567,8 +582,14 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 const Text('Paused', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 12),
                 Wrap(spacing: 10, children: [
-                  FilledButton(onPressed: ()=>setState(()=>_mode=OverlayMode.running), child: const Text('Resume')),
-                  FilledButton.tonal(onPressed: _startRun, child: const Text('Restart')),
+                  FilledButton(
+                    onPressed: () async {
+                      setState(()=>_mode=OverlayMode.running);
+                      await _maybeStartBg();
+                    },
+                    child: const Text('Resume'),
+                  ),
+                  FilledButton.tonal(onPressed: () async { await _startRun(); }, child: const Text('Restart')),
                 ]),
               ],
             ),
@@ -600,7 +621,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 Text('Level $_level cleared! Next goal → ${_goalFor(_level + 1)}',
                     style: const TextStyle(color: Color(0xFFcbd5e1))),
                 const SizedBox(height: 12),
-                FilledButton(onPressed: _advanceLevel, child: const Text('Next Level')),
+                FilledButton(onPressed: () async { await _advanceLevel(); }, child: const Text('Next Level')),
               ],
             ),
           ),
@@ -627,10 +648,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 const Text('Game Over', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
                 Text('Final: $_score', style: const TextStyle(color: Color(0xFFcbd5e1))),
-                Text('Session Best: $_sessionBest', style: const TextStyle(color: Color(0xFFcbd5e1))),
                 Text('High (Saved): $_high', style: const TextStyle(color: Color(0xFFcbd5e1))),
                 const SizedBox(height: 12),
-                FilledButton(onPressed: _startRun, child: const Text('Try Again')),
+                FilledButton(onPressed: () async { await _startRun(); }, child: const Text('Try Again')),
               ],
             ),
           ),
