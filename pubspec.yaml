@@ -1,35 +1,28 @@
 name: brainybubbles
-description: Brainy Bubbles Flutter WebView wrapper
-publish_to: 'none' # this prevents accidental publishing
-
+description: Brainy Bubbles — simple bubble popping game with music and pops
+publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: ">=3.3.0 <4.0.0"
+
+# If you’re on a much older Flutter/Dart SDK, tell me and I’ll adjust this.
+# This works well with current stable Flutter 3.x + Dart 3.x.
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # WebView support
-  webview_flutter: ^4.13.0
-  webview_flutter_android: ^3.16.0
-  webview_flutter_wkwebview: ^3.14.0
-
-  # Audio player
-  audioplayers: ^5.2.1
-
-  # Misc Flutter dependencies
-  cupertino_icons: ^1.0.8
+  # Sound: background music + pop SFX
+  audioplayers: 5.2.1
 
 dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^3.0.2
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true
 
+  # Make sure these files exist with these exact names and paths:
   assets:
     - assets/audio/brainy_bubbles_bg.mp3
     - assets/audio/pop_hi.mp3
