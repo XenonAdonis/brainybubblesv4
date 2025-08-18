@@ -1,21 +1,3 @@
-// Brainy Bubbles – Flutter Web (Vercel-ready)
-// Splash screen, target match, timer/goal, level-ups, star particles,
-// reduced-motion, music toggle. Music now starts reliably after Start
-// and on subsequent resumes/level-ups. "Best" badge removed;
-// only persistent High score shown on Game Over.
-//
-// Audio assets expected (or keep folder with .gitkeep):
-//   assets/audio/brainy_bubbles_bg.mp3
-//   assets/audio/pop_hi.mp3
-//   assets/audio/pop_lo.mp3
-//   assets/audio/cheer_triple.mp3
-//
-// pubspec.yaml:
-// flutter:
-//   uses-material-design: true
-//   assets:
-//     - assets/audio/
-
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -55,71 +37,96 @@ class _GameScreenState extends State<GameScreen> {
   Timer? _gameTimer;
   int _timeLeft = 30;
 
-  final AudioPlayer _musicPlayer = AudioPlayer();
-  final AudioPlayer _effectPlayer = AudioPlayer();
+  final AudioPlayer _musicPlayer = AudioPlayer();   // loops
+  final AudioPlayer _effectPlayer = AudioPlayer();  // one-shots (pop/cheer)
   bool _musicOn = true;
 
   @override
   void initState() {
     super.initState();
     _startMusic();
-    _startGame();
+    // Start a run immediately so the screen shows the game; you can change this
+    // to show a splash if you prefer.
+    unawaited(_startGame());
   }
 
-  void _startMusic() async {
-    await _musicPlayer.setReleaseMode(ReleaseMode.loop);
-    await _musicPlayer.play(AssetSource('audio/background_music.mp3'));
-    setState(() {
-      _musicOn = true;
-    });
-  }
-
-  void _toggleMusic() {
-    if (_musicOn) {
-      _musicPlayer.pause();
-    } else {
-      _musicPlayer.resume();
+  // Background music: start & loop
+  Future<void> _startMusic() async {
+    try {
+      await _musicPlayer.setReleaseMode(ReleaseMode.loop);
+      await _musicPlayer.play(AssetSource('audio/background_music.mp3'));
+      setState(() => _musicOn = true);
+    } catch (_) {
+      // If asset missing or autoplay blocked, ignore (user can toggle via FAB)
     }
+  }
+
+  void _toggleMusic() async {
+    if (_musicOn) {
+      await _musicPlayer.pause();
+    } else {
+      // If first time failed due to policy, this manual interaction should succeed
+      if (_musicPlayer.source == null) {
+        // Ensure source set (in case autoplay failed before)
+        try {
+          await _musicPlayer.setReleaseMode(ReleaseMode.loop);
+          await _musicPlayer.setSource(AssetSource('audio/background_music.mp3'));
+        } catch (_) {}
+      }
+      await _musicPlayer.resume();
+    }
+    setState(() => _musicOn = !_musicOn);
+  }
+
+  Future<void> _playPopSound() async {
+    try {
+      await _effectPlayer.stop();
+      await _effectPlayer.setSource(AssetSource('audio/pop.mp3'));
+      await _effectPlayer.resume();
+    } catch (_) {}
+  }
+
+  Future<void> _playCheerSound() async {
+    try {
+      await _effectPlayer.stop();
+      await _effectPlayer.setSource(AssetSource('audio/cheer.mp3'));
+      await _effectPlayer.resume();
+    } catch (_) {}
+  }
+
+  // ---------------------- FIX: now async so 'await' is valid -----------------
+  Future<void> _startGame() async {
     setState(() {
-      _musicOn = !_musicOn;
+      _score = 0;
+      _timeLeft = 30;
+      _gameOver = false;
+      _bubbles.clear();
     });
-  }
-
-  void _playPopSound() {
-    _effectPlayer.play(AssetSource('audio/pop.mp3'));
-  }
-
-  void _playCheerSound() {
-    _effectPlayer.play(AssetSource('audio/cheer.mp3'));
-  }
-
-  void _startGame() {
-    _score = 0;
-    _timeLeft = 30;
-    _gameOver = false;
-    _bubbles.clear();
 
     _bubbleTimer?.cancel();
     _gameTimer?.cancel();
 
+    // Spawn bubbles regularly
     _bubbleTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      if (!_gameOver) {
-        setState(() {
-          _bubbles.add(Bubble(
-            id: DateTime.now().millisecondsSinceEpoch,
-            x: _random.nextDouble(),
-            y: 1.2,
-            size: 40 + _random.nextDouble() * 40,
-          ));
-        });
-      }
+      if (_gameOver) return;
+      setState(() {
+        _bubbles.add(Bubble(
+          id: DateTime.now().millisecondsSinceEpoch,
+          // x: 0..1 is relative; convert to pixels in Positioned
+          x: _random.nextDouble(),
+          // start just off-screen
+          y: 1.2,
+          size: 40 + _random.nextDouble() * 40,
+          // give each bubble a random upward speed
+          vy: 0.25 + _random.nextDouble() * 0.35,
+        ));
+      });
     });
 
+    // Countdown timer
     _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_timeLeft > 0) {
-        setState(() {
-          _timeLeft--;
-        });
+        setState(() => _timeLeft--);
       } else {
         _endGame();
       }
@@ -130,7 +137,8 @@ class _GameScreenState extends State<GameScreen> {
     _gameOver = true;
     _bubbleTimer?.cancel();
     _gameTimer?.cancel();
-    _playCheerSound();
+    unawaited(_playCheerSound());
+    setState(() {}); // show game over overlay
   }
 
   void _popBubble(int id) {
@@ -138,7 +146,7 @@ class _GameScreenState extends State<GameScreen> {
       _bubbles.removeWhere((bubble) => bubble.id == id);
       _score++;
     });
-    _playPopSound();
+    unawaited(_playPopSound());
   }
 
   @override
@@ -152,18 +160,24 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
       body: Stack(
         children: [
+          // Tap to pop
           GestureDetector(
             onTapDown: (details) {
-              final tapPos = details.localPosition;
+              final tap = details.localPosition;
               for (final bubble in List<Bubble>.from(_bubbles)) {
-                if ((bubble.x * MediaQuery.of(context).size.width - tapPos.dx).abs() <
-                        bubble.size / 2 &&
-                    (bubble.y * MediaQuery.of(context).size.height - tapPos.dy).abs() <
-                        bubble.size / 2) {
+                final bx = bubble.x * size.width;
+                final by = bubble.y * size.height;
+                final dx = bx - tap.dx;
+                final dy = by - tap.dy;
+                final hit = (dx * dx + dy * dy) <= (bubble.size / 2) * (bubble.size / 2);
+                if (hit) {
                   _popBubble(bubble.id);
+                  break;
                 }
               }
             },
@@ -172,13 +186,22 @@ class _GameScreenState extends State<GameScreen> {
               color: Colors.blue.shade900,
               child: Stack(
                 children: [
+                  // Move/render bubbles
                   ..._bubbles.map((bubble) {
+                    // Update Y for a gentle float upwards (in a very simple way).
+                    // For deterministic motion, this should be based on real time;
+                    // keeping it simple here for clarity.
+                    final newY = bubble.y - bubble.vy * 0.01; // small per-frame step
+                    bubble.y = newY;
+
                     return Positioned(
-                      left: bubble.x * MediaQuery.of(context).size.width,
-                      top: bubble.y * MediaQuery.of(context).size.height,
+                      left: bubble.x * size.width - bubble.size / 2,
+                      top: bubble.y * size.height - bubble.size / 2,
                       child: BubbleWidget(bubble: bubble),
                     );
-                  }).toList(),
+                  }),
+
+                  // HUD
                   Positioned(
                     top: 40,
                     left: 20,
@@ -193,7 +216,11 @@ class _GameScreenState extends State<GameScreen> {
               ),
             ),
           ),
+
+          // Game Over overlay
           if (_gameOver) _buildGameOver(),
+
+          // Music toggle
           Positioned(
             bottom: 40,
             right: 20,
@@ -228,7 +255,7 @@ class _GameScreenState extends State<GameScreen> {
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: () async {
-                    await _startGame();
+                    await _startGame(); // ✅ now valid because _startGame() is async
                   },
                   child: const Text('Try Again'),
                 ),
@@ -244,10 +271,17 @@ class _GameScreenState extends State<GameScreen> {
 class Bubble {
   final int id;
   final double x;
-  final double y;
+  double y;         // mutable so we can animate simple upward motion
   final double size;
+  final double vy;  // upward speed in "screen fraction per tick"
 
-  Bubble({required this.id, required this.x, required this.y, required this.size});
+  Bubble({
+    required this.id,
+    required this.x,
+    required this.y,
+    required this.size,
+    required this.vy,
+  });
 }
 
 class BubbleWidget extends StatelessWidget {
@@ -268,3 +302,6 @@ class BubbleWidget extends StatelessWidget {
     );
   }
 }
+
+// Fire-and-forget helper for Futures we don't want to await.
+void unawaited(Future<void> f) {}

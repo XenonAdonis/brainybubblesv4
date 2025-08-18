@@ -21,4 +21,5 @@ flutter:
   assets:
     - assets/icons/
     - assets/images/
-    - assets/audio/
+    - assets/audio/background_music.mp3
+    - assets/audio/pop.mp3
