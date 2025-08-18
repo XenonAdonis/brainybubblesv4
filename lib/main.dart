@@ -54,7 +54,7 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _startMusic() async {
     try {
       await _musicPlayer.setReleaseMode(ReleaseMode.loop);
-      await _musicPlayer.play(AssetSource('audio/background_music.mp3'));
+      await _musicPlayer.play(AssetSource('audio/brainy_bubbles_bg.mp3'));
       setState(() => _musicOn = true);
     } catch (_) {
       // If asset missing or autoplay blocked, ignore (user can toggle via FAB)
@@ -70,7 +70,7 @@ class _GameScreenState extends State<GameScreen> {
         // Ensure source set (in case autoplay failed before)
         try {
           await _musicPlayer.setReleaseMode(ReleaseMode.loop);
-          await _musicPlayer.setSource(AssetSource('audio/background_music.mp3'));
+          await _musicPlayer.setSource(AssetSource('audio/brainy_bubbles_bg.mp3'));
         } catch (_) {}
       }
       await _musicPlayer.resume();
