@@ -1,9 +1,10 @@
-import 'dart:async';
-import 'dart:math';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const BrainyBubblesApp());
 }
 
@@ -14,182 +15,179 @@ class BrainyBubblesApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Brainy Bubbles',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(),
-      home: const BubbleGame(),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4F46E5)),
+        useMaterial3: true,
+      ),
+      home: const WebGameScreen(),
     );
   }
 }
 
-class BubbleGame extends StatefulWidget {
-  const BubbleGame({super.key});
+class WebGameScreen extends StatefulWidget {
+  const WebGameScreen({super.key});
 
   @override
-  State<BubbleGame> createState() => _BubbleGameState();
+  State<WebGameScreen> createState() => _WebGameScreenState();
 }
 
-class _BubbleGameState extends State<BubbleGame> {
-  final List<Bubble> _bubbles = [];
-  final Random _rand = Random();
+class _WebGameScreenState extends State<WebGameScreen> {
+  late final WebViewController _controller;
+  bool _isLoading = true;
+  String? _lastError;
 
-  // Audio players
-  late final AudioPlayer _bgPlayer;
-  late final AudioPlayer _popPlayer;
-  StreamSubscription? _bgSub;
-
-  int _popToggle = 0; // alternate hi/lo pops
-  int _score = 0;
+  // 👉 Put your **exact** Vercel URL here. The query string helps bust cache.
+  static String _gameUrl() {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    return 'https://brainybubblesv4.vercel.app/?app=android&v=2&t=$ts';
+  }
 
   @override
   void initState() {
     super.initState();
 
-    _bgPlayer = AudioPlayer();
-    _popPlayer = AudioPlayer();
+    final params = const PlatformWebViewControllerCreationParams();
+    final controller = WebViewController.fromPlatformCreationParams(params)
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF0B1224))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (url) {
+            setState(() {
+              _isLoading = true;
+              _lastError = null;
+            });
+          },
+          onPageFinished: (url) {
+            setState(() {
+              _isLoading = false;
+            });
+          },
+          onWebResourceError: (err) {
+            setState(() {
+              _isLoading = false;
+              _lastError = err.description;
+            });
+          },
+        ),
+      )
+      ..setUserAgent(
+        // A modern mobile UA helps some frameworks pick mobile layout correctly.
+        'Mozilla/5.0 (Linux; Android 14; Pixel 9 Pro XL) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+      )
+      ..loadRequest(Uri.parse(_gameUrl()));
 
-    _startBackgroundMusic();
-
-    // Spawn bubbles every 2s
-    Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (!mounted) return;
-      setState(() {
-        _bubbles.add(Bubble(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          x: _rand.nextDouble() * 300,
-          y: 600,
-          size: 40 + _rand.nextDouble() * 40,
-          speed: 20 + _rand.nextDouble() * 40,
-        ));
-      });
-    });
-  }
-
-  Future<void> _startBackgroundMusic() async {
-    try {
-      if (_bgPlayer.state != PlayerState.playing) {
-        await _bgPlayer.setReleaseMode(ReleaseMode.loop);
-        await _bgPlayer.play(
-          AssetSource('audio/brainy_bubbles_bg.mp3'),
-          volume: 0.3,
-        );
-      }
-    } catch (_) {
-      // ignore autoplay restrictions (esp. on web)
+    // Android-specific tuning: allow media to autoplay, enable debugging
+    if (controller.platform is AndroidWebViewController) {
+      final androidCtrl = controller.platform as AndroidWebViewController;
+      AndroidWebViewController.enableDebugging(true);
+      // Allow background audio/video to start without a tap (helps BG music)
+      androidCtrl.setMediaPlaybackRequiresUserGesture(false);
+      // Optional: make scrolling smoother for canvas games
+      androidCtrl.setRendererPriorityPolicy(
+        RendererPriority.bound,
+        true,
+      );
     }
+
+    _controller = controller;
   }
 
-  Future<void> _playPopSound() async {
-    final sound = (_popToggle % 2 == 0)
-        ? 'audio/pop_hi.mp3'
-        : 'audio/pop_lo.mp3';
-    _popToggle++;
-
-    try {
-      await _popPlayer.play(AssetSource(sound), volume: 1.0);
-    } catch (_) {}
-  }
-
-  @override
-  void dispose() {
-    _bgSub?.cancel();
-    _bgPlayer.dispose();
-    _popPlayer.dispose();
-    super.dispose();
-  }
-
-  void _popBubble(Bubble bubble) {
+  Future<void> _reload() async {
     setState(() {
-      _bubbles.removeWhere((b) => b.id == bubble.id);
-      _score++;
+      _isLoading = true;
+      _lastError = null;
     });
-    _playPopSound();
+    await _controller.loadRequest(Uri.parse(_gameUrl()));
+  }
+
+  Future<bool> _handleBack() async {
+    if (await _controller.canGoBack()) {
+      _controller.goBack();
+      return false;
+    }
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: GestureDetector(
-        onTapDown: (details) {
-          final tapPos = details.localPosition;
-          final hit = _bubbles.firstWhere(
-            (b) =>
-                (tapPos.dx - b.x).abs() < b.size / 2 &&
-                (tapPos.dy - b.y).abs() < b.size / 2,
-            orElse: () => Bubble.empty(),
-          );
-          if (!hit.isEmpty) _popBubble(hit);
-        },
-        child: Stack(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        final allowSystemPop = await _handleBack();
+        if (allowSystemPop && context.mounted) Navigator.of(context).maybePop();
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0B1224),
+        appBar: AppBar(
+          title: const Text('Brainy Bubbles'),
+          backgroundColor: const Color(0xFF0B1224),
+          foregroundColor: const Color(0xFFE2E8F0),
+          elevation: 0,
+          actions: [
+            IconButton(
+              tooltip: 'Reload',
+              onPressed: _reload,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        body: Stack(
           children: [
-            // Background gradient
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.blueAccent, Colors.black],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-              ),
-            ),
-            // Moving bubbles
-            ..._bubbles.map((b) => AnimatedPositioned(
-                  key: ValueKey(b.id),
-                  duration: Duration(seconds: (b.speed ~/ 10)),
-                  curve: Curves.linear,
-                  top: 0,
-                  left: b.x,
-                  child: Container(
-                    width: b.size,
-                    height: b.size,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.3),
-                      border: Border.all(color: Colors.white70, width: 2),
-                    ),
+            // WebView content
+            WebViewWidget(controller: _controller),
+
+            // Loading overlay
+            if (_isLoading)
+              Positioned.fill(
+                child: Container(
+                  color: const Color(0xFF0B1224),
+                  child: const Center(
+                    child: CircularProgressIndicator(),
                   ),
-                )),
-            // Score display
-            Positioned(
-              top: 40,
-              left: 20,
-              child: Text(
-                'Score: $_score',
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  shadows: [Shadow(blurRadius: 4, color: Colors.black)],
                 ),
               ),
-            ),
+
+            // Error overlay with retry
+            if (_lastError != null)
+              Positioned.fill(
+                child: Container(
+                  color: const Color(0xFF0B1224),
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.wifi_off, size: 48, color: Colors.white70),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Couldn’t load the game',
+                        style: TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _lastError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Color(0xFF94A3B8)),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: _reload,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Try Again'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
-}
-
-class Bubble {
-  final String id;
-  final double x;
-  final double y;
-  final double size;
-  final double speed;
-
-  Bubble({
-    required this.id,
-    required this.x,
-    required this.y,
-    required this.size,
-    required this.speed,
-  });
-
-  Bubble.empty()
-      : id = '',
-        x = 0,
-        y = 0,
-        size = 0,
-        speed = 0;
-
-  bool get isEmpty => id.isEmpty;
 }
