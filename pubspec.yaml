@@ -1,6 +1,5 @@
 name: brainybubbles
-description: Brainy Bubbles — simple bubble popping game with music and pops
-publish_to: "none"
+description: "Brainy Bubbles - Pop, match, and think fast in this fun bubble puzzle game!"
 version: 1.0.0+1
 
 environment:
