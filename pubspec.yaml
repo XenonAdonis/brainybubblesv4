@@ -12,7 +12,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  # Cross-platform WebView (works on Android & iOS)
+  webview_flutter: ^4.13.0
   # Sound: background music + pop SFX
   audioplayers: 5.2.1
 
