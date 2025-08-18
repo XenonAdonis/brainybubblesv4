@@ -22,4 +22,5 @@ flutter:
     - assets/icons/
     - assets/images/
     - assets/audio/brainy_bubbles_bg.mp3
-    - assets/audio/pop.mp3
+    - assets/audio/pop_hi.mp3
+    - assets/audio/pop_lo.mp3
