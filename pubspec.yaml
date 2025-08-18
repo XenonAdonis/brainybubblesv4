@@ -1,27 +1,36 @@
 name: brainybubbles
-description: Brainy Bubbles Flutter app (web)
-publish_to: "none"
+description: Brainy Bubbles Flutter WebView wrapper
+publish_to: 'none' # this prevents accidental publishing
+
 version: 1.0.0+1
 
 environment:
-  sdk: ">=2.17.0 <4.0.0"
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  webview_flutter: ^4.7.0
-  audioplayers: ^5.2.0
-  shared_preferences: ^2.2.2
+
+  # WebView support
+  webview_flutter: ^4.13.0
+  webview_flutter_android: ^3.16.0
+  webview_flutter_wkwebview: ^3.14.0
+
+  # Audio player
+  audioplayers: ^5.2.1
+
+  # Misc Flutter dependencies
+  cupertino_icons: ^1.0.8
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_lints: ^3.0.2
 
 flutter:
   uses-material-design: true
+
   assets:
-    - assets/icons/
-    - assets/images/
     - assets/audio/brainy_bubbles_bg.mp3
     - assets/audio/pop_hi.mp3
     - assets/audio/pop_lo.mp3

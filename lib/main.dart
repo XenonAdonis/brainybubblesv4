@@ -1,11 +1,9 @@
-import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  // On Android, WebView needs this initialization.
-  if (Platform.isAndroid) WebViewPlatform.instance = AndroidWebView();
   runApp(const BrainyBubblesApp());
 }
 
@@ -16,8 +14,10 @@ class BrainyBubblesApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Brainy Bubbles',
-      theme: ThemeData.dark(useMaterial3: true),
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
       home: const WebGameScreen(),
     );
   }
@@ -25,157 +25,72 @@ class BrainyBubblesApp extends StatelessWidget {
 
 class WebGameScreen extends StatefulWidget {
   const WebGameScreen({super.key});
+
   @override
   State<WebGameScreen> createState() => _WebGameScreenState();
 }
 
 class _WebGameScreenState extends State<WebGameScreen> {
-  // TODO: Put your live Vercel URL here (no trailing slash issues)
-  static const String gameUrl = 'https://https://brainybubblesv4.vercel.app/';
-
   late final WebViewController _controller;
-  bool _isLoading = true;
-  String? _lastError;
+  final AudioPlayer _bgPlayer = AudioPlayer();
+  final AudioPlayer _sfxPlayer = AudioPlayer();
 
   @override
   void initState() {
     super.initState();
 
-    final params = PlatformWebViewControllerCreationParams();
-    final ctrl = WebViewController.fromPlatformCreationParams(params)
-      // Allow JS so your React/Canvas game runs
+    // Initialize WebView controller
+    _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      // Allow audio to start without a tap
-      ..setInitialMediaPlaybackPolicy(AutoMediaPlaybackPolicy.always_allow)
-      // Let the game open internal links in-place
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (_) => setState(() {
-            _isLoading = true;
-            _lastError = null;
-          }),
-          onPageFinished: (_) => setState(() => _isLoading = false),
-          onWebResourceError: (err) => setState(() {
-            _lastError = err.description;
-            _isLoading = false;
-          }),
-        ),
+      ..addJavaScriptChannel(
+        "BubbleChannel",
+        onMessageReceived: (JavaScriptMessage message) {
+          if (message.message == "pop") {
+            _playPopSound();
+          }
+        },
       )
-      ..loadRequest(Uri.parse(gameUrl));
+      ..loadRequest(Uri.parse("https://brainybubblesv4.vercel.app/"));
 
-    _controller = ctrl;
+    // Start background music automatically
+    _playBackgroundMusic();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _lastError = null;
-      _isLoading = true;
-    });
-    try {
-      await _controller.reload();
-    } catch (_) {
-      setState(() => _isLoading = false);
-    }
+  Future<void> _playBackgroundMusic() async {
+    await _bgPlayer.setReleaseMode(ReleaseMode.loop);
+    await _bgPlayer.play(AssetSource("audio/brainy_bubbles_bg.mp3"));
   }
 
-  // Handle Android back button to go back inside the WebView history
-  Future<bool> _onWillPop() async {
-    if (await _controller.canGoBack()) {
-      await _controller.goBack();
-      return false;
-    }
-    return true; // exit the app
+  Future<void> _playPopSound() async {
+    // Randomize between high and low pop
+    final sound = Random().nextBool() ? "pop_hi.mp3" : "pop_lo.mp3";
+    await _sfxPlayer.play(AssetSource("audio/$sound"));
+  }
+
+  @override
+  void dispose() {
+    _bgPlayer.dispose();
+    _sfxPlayer.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        body: SafeArea(
-          child: Stack(
-            children: [
-              // Pull-to-refresh for convenience
-              RefreshIndicator(
-                onRefresh: () async => _controller.reload(),
-                child: _lastError != null
-                    ? _buildErrorView()
-                    : WebViewWidget(controller: _controller),
-              ),
-
-              // Lightweight native splash while the game loads
-              if (_isLoading) const _SplashOverlay(),
-            ],
-          ),
-        ),
+    return Scaffold(
+      body: SafeArea(
+        child: WebViewWidget(controller: _controller),
       ),
-    );
-  }
-
-  Widget _buildErrorView() {
-    return ListView( // needed for RefreshIndicator to work
-      children: [
-        SizedBox(
-          height: MediaQuery.of(context).size.height * 0.8,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi_off, size: 48),
-                const SizedBox(height: 12),
-                const Text(
-                  'Couldn’t load Brainy Bubbles',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _lastError ?? 'Unknown error',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: _reload,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SplashOverlay extends StatelessWidget {
-  const _SplashOverlay();
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0f172a), Color(0xFF0b1224)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Text('Brainy Bubbles',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
-              SizedBox(height: 10),
-              Text('Loading...',
-                  style: TextStyle(color: Color(0xFFcbd5e1))),
-              SizedBox(height: 16),
-              CircularProgressIndicator(),
-            ],
-          ),
-        ),
+      floatingActionButton: FloatingActionButton(
+        child: const Icon(Icons.music_note),
+        onPressed: () async {
+          // Toggle music on/off
+          final state = await _bgPlayer.getState();
+          if (state == PlayerState.playing) {
+            await _bgPlayer.pause();
+          } else {
+            await _bgPlayer.resume();
+          }
+        },
       ),
     );
   }
